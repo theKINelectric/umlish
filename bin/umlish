@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# umlish — agent-facing CLI for the UMLish service.
+#
+#   UMLish displays a project as UML: packages, classes, dependency
+#   edges with file:line evidence. This script is a thin, dependency-
+#   free wrapper over the HTTP API so agents (and humans) don't have
+#   to remember URL shapes.
+#
+# Usage:
+#   umlish scan PATH [--scope all] [--mermaid]   class document for a local project
+#   umlish internals [--mermaid]                 live introspection of the service itself
+#   umlish graph [SNAPSHOT] [--mermaid]          package/component graph
+#   umlish package SNAPSHOT PACKAGE              one component: classes + boundary edges
+#   umlish class SNAPSHOT CLASS_ID               class card with evidence (deps both ways)
+#   umlish mermaid [SNAPSHOT]                    mermaid package-graph source
+#   umlish latest [--kind internals|project]     newest snapshot id (optionally filtered)
+#   umlish snapshots                             snapshot history (JSON)
+#   umlish url                                   print the base URL in use
+#
+# Environment:
+#   UMLISH_URL     base URL of the service (default http://127.0.0.1:4010,
+#                  the local production instance; dev runs on :4000)
+#   UMLISH_TIMEOUT curl timeout in seconds (default 120)
+#
+# Examples:
+#   umlish scan /path/to/project | jq '.meta'
+#   umlish scan /path/to/project --mermaid > arch.mmd
+#   ID=$(umlish scan /path/to/project | jq -r '.meta.snapshot_id')
+#   umlish graph "$ID" | jq '.edges[] | select(.pair_count > 5)'
+#   umlish package "$ID" workbench
+#   umlish class "$ID" src.workbench.flow
+set -euo pipefail
+
+BASE="${UMLISH_URL:-http://127.0.0.1:4010}"
+BASE="${BASE%/}"
+
+die() { echo "umlish: $*" >&2; exit 1; }
+usage() { sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; }
+
+get() { # get PATH -> body on stdout; non-200 body on stderr + exit
+  local path="$1" body status
+  body="$(curl -sS -m "${UMLISH_TIMEOUT:-120}" -w '\n%{http_code}' "$BASE$path")" \
+    || die "request failed: $BASE$path"
+  status="${body##*$'\n'}"
+  body="${body%$'\n'*}"
+  if [ "$status" != "200" ]; then
+    echo "$body" >&2
+    die "HTTP $status from $BASE$path"
+  fi
+  printf '%s\n' "$body"
+}
+
+urlenc() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/ /%20/g'; }
+
+latest_snapshot() { # latest_snapshot [kind] -> id
+  # One object per line, then read id/kind from the same object.
+  get "/api/schemas" | sed 's/},[[:space:]]*{/}\n{/g' | awk -v k="${1:-}" '
+    match($0, /"id":[0-9]+/) {
+      # capture before the next match() resets RSTART/RLENGTH
+      id = substr($0, RSTART + 5, RLENGTH - 5)
+      if (match($0, /"kind":"[a-z]+/)) {
+        kind = substr($0, RSTART + 8, RLENGTH - 8)
+        if (k == "" || kind == k) { print id; exit }
+      }
+    }'
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  url)
+    echo "$BASE"
+    ;;
+
+  scan)
+    [ -n "${1:-}" ] || die "scan needs a PATH"
+    path="$1"; shift
+    query="?path=$(urlenc "$path")"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --scope) shift; [ -n "${1:-}" ] || die "--scope needs a value"; query="$query&scope=$(urlenc "$1")" ;;
+        --scope=*) query="$query&scope=$(urlenc "${1#--scope=}")" ;;
+        --mermaid) query="$query&as=mermaid" ;;
+        *) die "unknown scan option: $1" ;;
+      esac
+      shift
+    done
+    get "/api/uml$query"
+    ;;
+
+  internals)
+    query=""
+    [ "${1:-}" = "--mermaid" ] && query="?as=mermaid"
+    get "/api/internals$query"
+    ;;
+
+  graph)
+    id=""
+    for arg in "$@"; do
+      case "$arg" in
+        --mermaid) ;;
+        *) id="$arg" ;;
+      esac
+    done
+    [ -n "$id" ] || id="$(latest_snapshot)" || true
+    [ -n "$id" ] || die "no snapshots stored yet — run a scan first"
+    query=""
+    [ "${1:-}" = "--mermaid" ] && [ -z "${2:-}" ] && query="?as=mermaid"
+    for arg in "$@"; do [ "$arg" = "--mermaid" ] && query="?as=mermaid"; done
+    get "/api/schemas/$id/graph$query"
+    ;;
+
+  package)
+    [ -n "${1:-}" ] && [ -n "${2:-}" ] || die "package needs SNAPSHOT and PACKAGE"
+    get "/api/schemas/$1/graph/$(urlenc "$2")"
+    ;;
+
+  class)
+    [ -n "${1:-}" ] && [ -n "${2:-}" ] || die "class needs SNAPSHOT and CLASS_ID"
+    get "/api/schemas/$1/classes/$(urlenc "$2")"
+    ;;
+
+  mermaid)
+    id=""
+    for arg in "$@"; do case "$arg" in [0-9]*) id="$arg";; esac; done
+    [ -n "$id" ] || id="$(latest_snapshot)" || true
+    [ -n "$id" ] || die "no snapshots stored yet — run a scan first"
+    get "/api/schemas/$id/graph?as=mermaid"
+    ;;
+
+  latest)
+    kind=""
+    for arg in "$@"; do case "$arg" in internals|project) kind="$arg";; esac; done
+    id="$(latest_snapshot "$kind")"
+    [ -n "$id" ] || die "no matching snapshots"
+    echo "$id"
+    ;;
+
+  snapshots)
+    get "/api/schemas"
+    ;;
+
+  help|-h|--help|"")
+    usage
+    ;;
+
+  *)
+    usage >&2
+    die "unknown command: $cmd"
+    ;;
+esac

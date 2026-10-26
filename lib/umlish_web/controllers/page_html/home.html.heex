@@ -1,0 +1,207 @@
+<div class="shell">
+  <header class="masthead">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28">
+          <rect x="2" y="2" width="12" height="12" rx="2" class="mark-a" />
+          <rect x="18" y="18" width="12" height="12" rx="2" class="mark-b" />
+          <path d="M8 18v6a2 2 0 0 0 2 2h6" class="mark-link" />
+          <path d="M24 14V8a2 2 0 0 0-2-2h-6" class="mark-link" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="wordmark">UMLish</h1>
+        <p class="tagline">
+          display a project as UML · a <span class="byline">🛸🕳️ iStellar~iModal</span> creation
+        </p>
+      </div>
+    </div>
+    <nav class="mast-nav">
+      <a href="/api/internals" target="_blank" rel="noopener">internals JSON</a>
+      <a href="/api/schemas" target="_blank" rel="noopener">snapshots</a>
+      <a href="#agent-api">agent API</a>
+      <a href="https://github.com/unclebob/uml-viewer" target="_blank" rel="noopener">
+        after unclebob/uml-viewer
+      </a>
+    </nav>
+  </header>
+
+  <section class="controls card">
+    <div class="control-row">
+      <button id="btn-internals" class="btn primary" type="button">
+        ⊙ View this service's internals
+      </button>
+      <span class="control-hint">
+        live BEAM introspection — what is loaded <em>right now</em>
+      </span>
+    </div>
+    <div class="control-row">
+      <form id="form-project" class="project-form" autocomplete="off">
+        <input
+          id="input-path"
+          name="path"
+          type="text"
+          spellcheck="false"
+          placeholder="/path/to/a/local/project (mix.exs or build.zig)"
+          aria-label="Local project directory"
+        />
+        <button class="btn" type="submit" id="btn-project">▶ Analyze project</button>
+      </form>
+    </div>
+    <div class="control-row">
+      <label class="btn">
+        Open HoneyBadger graph
+        <input id="input-native" type="file" accept=".json,application/json" />
+      </label>
+      <span class="control-hint">
+        Local source observations · 2 MiB / 2,048 sites maximum · stays in this browser
+      </span>
+    </div>
+    <p id="native-notice" class="control-row small" role="status" hidden></p>
+    <p class="control-row small" id="status">
+      Idle. The flow: validate → discover → parse → resolve → assemble → persist (FlowExtra/GenStage, one stage per process).
+    </p>
+  </section>
+
+  <section id="result" class="result" hidden>
+    <div class="result-head">
+      <div>
+        <h2 id="schema-title" class="schema-title"></h2>
+        <div id="chips" class="chips"></div>
+      </div>
+      <div class="result-actions">
+        <a id="link-json" class="btn small" target="_blank" rel="noopener">raw JSON</a>
+        <a id="link-mermaid" class="btn small" target="_blank" rel="noopener">mermaid source</a>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="graph" type="button">Package graph</button>
+      <button class="tab" data-tab="diagram" type="button">Class diagram</button>
+      <button class="tab" data-tab="packages" type="button">Packages</button>
+      <button class="tab" data-tab="edges" type="button">Edges</button>
+      <button class="tab" data-tab="json" type="button">JSON</button>
+    </nav>
+
+    <div class="tab-panel" id="panel-graph">
+      <p class="muted small" id="graph-status">
+        The component view: one node per package, one arrow per package pair (labelled with the
+        bundled class-edge count). Click a node to drill into its classes and dependencies.
+        Dotted arrows point at foreign libraries.
+      </p>
+      <div id="graph-box" class="mermaid-box"></div>
+      <div id="drill-panel" class="drill-panel" hidden></div>
+    </div>
+
+    <div class="tab-panel" id="panel-diagram" hidden>
+      <div id="mermaid-box" class="mermaid-box">
+        <p class="muted" id="mermaid-status">
+          Mermaid loads from a CDN; if you are offline use the Package graph / Packages / Edges
+          tabs — they are rendered locally.
+        </p>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-packages" hidden></div>
+    <div class="tab-panel" id="panel-edges" hidden></div>
+    <div class="tab-panel" id="panel-json" hidden>
+      <pre id="json-pre" class="json-pre"></pre>
+    </div>
+  </section>
+
+  <section class="card agent-api" id="agent-api">
+    <h3>
+      Agent API
+      <span class="muted small">— UMLish is built for agents working on applications</span>
+    </h3>
+
+    <p>
+      Every result is JSON over HTTP: scan a directory, read the component graph, drill into a
+      package or a single class with <code>file:line</code>
+      evidence for each dependency. Every
+      run is snapshotted to SQLite and addressable by id. Point your base URL at this service —
+      <code class="base-url">http://127.0.0.1:4010</code>
+      (the CLI and MCP default to
+      the production instance; this page always shows its own origin).
+    </p>
+
+    <div class="agent-grid">
+      <div>
+        <h4>1 · Diagram a project</h4>
+        <pre><code>curl "$UMLISH_URL/api/uml?path=/abs/path/to/project"</code></pre>
+        <p class="muted small">
+          Detects the language (<code>mix.exs</code> → Elixir, <code>build.zig</code>
+          → Zig).
+          Default scope is the primary <code>src</code>/<code>lib</code> roots; append
+          <code>&amp;scope=all</code>
+          for the whole tree. JSON body works too: <code>POST /api/uml &#123;"path": "…"&#125;</code>.
+        </p>
+
+        <h4>2 · Diagram this service itself</h4>
+        <pre><code>curl "$UMLISH_URL/api/internals"</code></pre>
+        <p class="muted small">Live BEAM introspection — modules actually loaded right now.</p>
+
+        <h4>3 · Component graph + drill-down</h4>
+        <pre><code>curl "$UMLISH_URL/api/schemas/$ID/graph"
+curl "$UMLISH_URL/api/schemas/$ID/graph/$PACKAGE"
+curl "$UMLISH_URL/api/schemas/$ID/classes/$CLASS_ID"</code></pre>
+        <p class="muted small">
+          Take <code>meta.snapshot_id</code> from step 1. The graph bundles class edges per
+          package pair; package detail lists its classes and boundary edges; the class card
+          carries both directions with <code>evidence: [&#123;file, line&#125;]</code>.
+        </p>
+
+        <h4>4 · Mermaid instead of JSON</h4>
+        <pre><code>curl "$UMLISH_URL/api/uml?path=…&amp;as=mermaid"</code></pre>
+        <p class="muted small">Works on every document endpoint — feeds mermaid directly.</p>
+      </div>
+
+      <div>
+        <h4>CLI (no curl gymnastics)</h4>
+        <pre><code>bin/umlish scan /abs/path/to/project   # class document
+bin/umlish scan /abs/path --scope all
+bin/umlish internals                  # this service, live
+bin/umlish graph [SNAPSHOT]           # component graph
+bin/umlish package SNAPSHOT PKG       # component detail
+bin/umlish class SNAPSHOT CLASS_ID    # class card + evidence
+bin/umlish mermaid [SNAPSHOT]         # mermaid source
+bin/umlish latest [--kind project]    # newest snapshot id</code></pre>
+        <p class="muted small">
+          Uses <code>UMLISH_URL</code> (default shown above). Ships in this repo and in every
+          deployment.
+        </p>
+
+        <h4>MCP server</h4>
+        <p class="muted small">
+          For agents that speak Model Context Protocol, <code>mcp/umlish-mcp.mjs</code> exposes
+          the same surface as tools: <code>umlish_scan</code>, <code>umlish_internals</code>, <code>umlish_graph</code>, <code>umlish_package</code>, <code>umlish_class</code>, <code>umlish_latest</code>. Stdio transport, zero dependencies:
+        </p>
+        <pre><code>&#123;"mcpServers": &#123;"umlish": &#123;
+  "command": "node",
+  "args": ["/abs/path/mcp/umlish-mcp.mjs"],
+  "env": &#123;"UMLISH_URL": "http://127.0.0.1:4000"&#125;
+&#125;&#125;&#125;}</code></pre>
+
+        <h4>Skill</h4>
+        <p class="muted small">
+          <code>skills/umlish/SKILL.md</code> in this repo is an installable agent skill
+          describing all of the above; drop it into your agent's skills directory.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="history card">
+    <h3>Snapshots <span class="muted small">(SQLite — every run is recorded)</span></h3>
+    <div id="history" class="history-list">
+      <p class="muted">…</p>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span>
+      UMLish · a 🛸🕳️ iStellar~iModal creation · Phoenix + FlowExtra (FBP on GenStage) + SQLite —
+      one request = one packet through the flow.
+    </span>
+  </footer>
+</div>
